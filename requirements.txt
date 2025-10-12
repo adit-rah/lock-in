@@ -1,0 +1,30 @@
+# Core dependencies
+torch>=2.0.0
+torchvision>=0.15.0
+opencv-python>=4.8.0
+numpy>=1.24.0
+pillow>=10.0.0
+
+# Configuration
+pyyaml>=6.0
+
+# Notifications (Windows)
+win10toast>=0.9; sys_platform == 'win32'
+
+# Notifications (cross-platform fallback)
+plyer>=2.1.0
+
+# Training utilities
+tqdm>=4.65.0
+
+# Data handling
+pandas>=2.0.0
+
+# Optional: GUI (uncomment if needed)
+# streamlit>=1.28.0
+
+# Development tools (optional)
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.0.0
+
