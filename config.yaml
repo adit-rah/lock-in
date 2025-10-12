@@ -1,0 +1,62 @@
+# Lock-In Focus Monitor Configuration
+
+# Model settings
+model:
+  architecture: "mobilenet_v3_small"  # or "resnet18"
+  input_size: 224
+  num_classes: 5
+  model_path: "models/distraction_classifier.pt"
+  use_gpu: true
+
+# Classes definition
+classes:
+  - "focused"
+  - "looking_away"
+  - "using_phone"
+  - "yawning"
+  - "sleepy"
+
+# Focused vs distracted mapping
+distracted_classes:
+  - "looking_away"
+  - "using_phone"
+  - "yawning"
+  - "sleepy"
+
+# Inference settings
+inference:
+  frame_interval_seconds: 3  # Capture frame every N seconds
+  camera_index: 0  # Webcam device index
+  max_inference_time_ms: 300  # Maximum allowed inference latency
+
+# Scoring settings
+scoring:
+  rolling_window_size: 10  # Number of recent frames to consider
+  alert_threshold: 0.3  # Lock-in score threshold
+  consecutive_frames_required: 3  # Consecutive distracted frames before alert
+
+# Notification settings
+notification:
+  enabled: true
+  title: "Lock-In Monitor"
+  distracted_message: "You're losing focus! Time to lock back in."
+  cooldown_seconds: 60  # Minimum time between notifications
+
+# Logging settings
+logging:
+  database_path: "data/focus_log.db"
+  log_predictions: true
+  log_scores: true
+  csv_backup: true
+  csv_path: "data/focus_log.csv"
+
+# Training settings (for model training)
+training:
+  batch_size: 32
+  epochs: 50
+  learning_rate: 0.001
+  weight_decay: 0.0001
+  validation_split: 0.2
+  early_stopping_patience: 10
+  checkpoint_dir: "checkpoints"
+
