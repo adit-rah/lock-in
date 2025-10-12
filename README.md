@@ -7,7 +7,7 @@ A desktop application that monitors your focus state in real-time using computer
 - **Real-time Focus Detection**: Classifies attention state every few seconds using your webcam
 - **Smart Scoring System**: Rolling window algorithm to avoid false positives
 - **Desktop Notifications**: Get alerted when losing focus
-- **Comprehensive Logging**: SQLite database + CSV backup for all sessions
+- **Comprehensive Logging**:s SQLite database + CSV backup for all sessions
 - **Privacy-First**: All processing happens locally, no cloud uploads
 - **Modular Architecture**: Easily extensible for new input modalities or hardware
 - **Configurable**: Tune sensitivity, intervals, and thresholds via YAML config
