@@ -1,8 +1,8 @@
-# Lock-In Focus Monitor 🔒
+# Lock-In Focus Monitor
 
 A desktop application that monitors your focus state in real-time using computer vision. The system captures webcam frames, classifies your attention level using a trained CNN, and alerts you when you're distracted for extended periods.
 
-## 🎯 Features
+## Features
 
 - **Real-time Focus Detection**: Classifies attention state every few seconds using your webcam
 - **Smart Scoring System**: Rolling window algorithm to avoid false positives
@@ -12,7 +12,7 @@ A desktop application that monitors your focus state in real-time using computer
 - **Modular Architecture**: Easily extensible for new input modalities or hardware
 - **Configurable**: Tune sensitivity, intervals, and thresholds via YAML config
 
-## 📋 Classification Categories
+## Classification Categories
 
 - **focused**: Actively engaged with work
 - **looking_away**: Eyes not on screen
@@ -20,7 +20,7 @@ A desktop application that monitors your focus state in real-time using computer
 - **yawning**: Signs of fatigue
 - **sleepy**: Drowsiness detected
 
-## 🏗️ System Architecture
+## System Architecture
 
 ```
 [Webcam Capture] → [Preprocessing] → [PyTorch Model Inference]
@@ -30,7 +30,7 @@ A desktop application that monitors your focus state in real-time using computer
                                     [SQLite + CSV Logging]
 ```
 
-## 🚀 Quick Start
+## Quick Start
 
 ### Prerequisites
 
@@ -127,7 +127,7 @@ notification:
   cooldown_seconds: 60  # Minimum time between notifications
 ```
 
-## 📊 Understanding Lock-In Score
+## Understanding Lock-In Score
 
 The **lock-in score** is computed as:
 
@@ -140,10 +140,10 @@ Where:
 - `P(distracted)` = mean probability of distracted classes (looking_away, using_phone, yawning, sleepy)
 
 **Score ranges**:
-- `S > 0.3`: Locked in ✅
-- `S < 0.3`: Distracted ⚠️
+- `S > 0.3`: Locked in
+- `S < 0.3`: Distracted
 
-## 📁 Project Structure
+## Project Structure
 
 ```
 lock-in/
@@ -215,14 +215,14 @@ python scripts/capture_samples.py --output data/personal --duration 300
 python -m src.train --data_dir data/personal --config config.yaml --resume models/distraction_classifier.pt
 ```
 
-## 📈 Performance Metrics
+## Performance Metrics
 
 - **Inference latency**: <300ms per frame (CPU)
 - **Storage**: ~1 MB/hour of logging data
 - **Model size**: <100 MB
 - **Accuracy**: Depends on training data quality
 
-## 🛠️ Development
+## Development
 
 ### Running Tests
 
@@ -237,7 +237,7 @@ black src/
 flake8 src/
 ```
 
-## 🔮 Future Enhancements
+## Future Enhancements
 
 - [ ] Keyboard/mouse activity tracking
 - [ ] Multi-modal fusion (webcam + activity sensors)
@@ -247,7 +247,7 @@ flake8 src/
 - [ ] Eye tracking integration
 - [ ] Hardware device support (smart lights, wearables)
 
-## 🤝 Contributing
+## Contributing
 
 Contributions welcome! Please:
 
@@ -256,11 +256,11 @@ Contributions welcome! Please:
 3. Make your changes
 4. Submit a pull request
 
-## 📄 License
+## License
 
 MIT License - see LICENSE file for details
 
-## ⚠️ Privacy & Ethics
+## Privacy & Ethics
 
 This application is designed for **personal use only**. Key considerations:
 
@@ -269,16 +269,16 @@ This application is designed for **personal use only**. Key considerations:
 - Use responsibly and with consent if monitoring others
 - Consider potential biases in training data
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 - Pretrained models from PyTorch/torchvision
 - Public datasets: State Farm, YawDD, Columbia Gaze
 - Notification libraries: plyer, win10toast
 
-## 📞 Support
+## Support
 
 For issues, questions, or feature requests, please open an issue on GitHub.
 
 ---
 
-**Stay focused, stay productive! 🔒✨**
+**Stay focused, stay productive!**
