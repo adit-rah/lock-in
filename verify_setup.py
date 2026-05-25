@@ -1,25 +1,19 @@
-"""Verify Lock-In setup and dependencies"""
+"""Verify Lock-In setup and dependencies."""
 
 import sys
 from pathlib import Path
 
 
-def check_python_version():
-    """Check Python version"""
-    version = sys.version_info
-    if version.major >= 3 and version.minor >= 8:
-        print(f"✓ Python {version.major}.{version.minor}.{version.micro}")
-        return True
-    else:
-        print(f"✗ Python {version.major}.{version.minor}.{version.micro} (requires 3.8+)")
-        return False
+def check_python_version() -> bool:
+    v = sys.version_info
+    ok = (v.major, v.minor) >= (3, 10)
+    mark = "✓" if ok else "✗"
+    print(f"{mark} Python {v.major}.{v.minor}.{v.micro} (requires 3.10+)")
+    return ok
 
 
-def check_import(module_name, display_name=None):
-    """Check if a module can be imported"""
-    if display_name is None:
-        display_name = module_name
-    
+def check_import(module_name: str, display_name: str = None) -> bool:
+    display_name = display_name or module_name
     try:
         __import__(module_name)
         print(f"✓ {display_name}")
@@ -29,110 +23,121 @@ def check_import(module_name, display_name=None):
         return False
 
 
-def check_camera():
-    """Check if camera is accessible"""
+def check_camera() -> bool:
     try:
         import cv2
-        cam = cv2.VideoCapture(0)
-        if cam.isOpened():
-            print("✓ Webcam accessible")
-            cam.release()
-            return True
-        else:
-            print("✗ Webcam not accessible")
-            return False
-    except Exception as e:
-        print(f"✗ Webcam check failed: {e}")
+    except ImportError:
+        print("✗ Webcam check skipped (cv2 not installed)")
         return False
+    cam = cv2.VideoCapture(0)
+    ok = cam.isOpened()
+    cam.release()
+    print(f"{'✓' if ok else '✗'} Webcam accessible")
+    return ok
 
 
-def check_gpu():
-    """Check GPU availability"""
+def check_device() -> None:
     try:
         import torch
-        if torch.cuda.is_available():
-            gpu_name = torch.cuda.get_device_name(0)
-            print(f"✓ GPU available: {gpu_name}")
-            return True
-        else:
-            print("⚠ GPU not available (CPU mode will be used)")
-            return False
-    except Exception as e:
-        print(f"⚠ GPU check failed: {e}")
-        return False
-
-
-def check_model():
-    """Check if model exists"""
-    model_path = Path("models/distraction_classifier.pt")
-    if model_path.exists():
-        print(f"✓ Model found: {model_path}")
-        return True
+    except ImportError:
+        print("⚠ Skipping device check (torch not installed)")
+        return
+    if torch.cuda.is_available():
+        print(f"✓ CUDA available: {torch.cuda.get_device_name(0)}")
+    elif getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        print("✓ Apple Silicon MPS available")
     else:
-        print(f"⚠ Model not found: {model_path}")
-        print("  → Train a model first: python -m src.train --data_dir <path>")
-        return False
+        print("⚠ No GPU detected — inference and training will run on CPU")
 
 
-def check_config():
-    """Check if config exists"""
-    config_path = Path("config.yaml")
-    if config_path.exists():
-        print(f"✓ Config found: {config_path}")
+def check_model() -> bool:
+    p = Path("models/distraction_classifier.pt")
+    if p.exists():
+        size_mb = p.stat().st_size / (1 << 20)
+        print(f"✓ Model found: {p} ({size_mb:.1f} MB)")
         return True
-    else:
-        print(f"✗ Config not found: {config_path}")
+    print(f"⚠ Model not found at {p}")
+    print("  → python scripts/download_model.py   (fetch v1.0.0 release asset)")
+    print("  → or train one (see QUICKSTART.md)")
+    return False
+
+
+def check_config_alignment() -> bool:
+    """Check that config.yaml's class order matches checkpoints/metrics.json (if present)."""
+    try:
+        from src.config import load_config
+    except ImportError:
+        print("✗ Cannot import src.config — repo isn't pip-installed yet (`pip install -e .`)")
         return False
 
+    try:
+        config = load_config("config.yaml")
+        print(f"✓ Config classes: {config.classes}")
+    except FileNotFoundError:
+        print("✗ config.yaml not found")
+        return False
 
-def main():
-    """Run all checks"""
-    print("="*60)
-    print("Lock-In Monitor - Setup Verification")
-    print("="*60)
-    
+    metrics_path = Path("checkpoints/metrics.json")
+    if not metrics_path.exists():
+        print("⚠ No checkpoints/metrics.json — train a model to enable class-order check")
+        return True
+
+    import json
+    metrics = json.loads(metrics_path.read_text())
+    trained = metrics.get("classes", [])
+    if trained and trained != config.classes:
+        print(f"✗ Class order mismatch: config={config.classes} vs trained={trained}")
+        print("  Predictions will be inverted at inference. Fix config.yaml.")
+        return False
+    print(f"✓ Config class order matches trained model ({trained})")
+    return True
+
+
+def main() -> int:
+    print("=" * 60)
+    print("Lock-In — Setup Verification")
+    print("=" * 60)
     results = []
-    
-    print("\n[Python Version]")
+
+    print("\n[Python]")
     results.append(check_python_version())
-    
-    print("\n[Required Dependencies]")
-    results.append(check_import("torch", "PyTorch"))
-    results.append(check_import("torchvision", "torchvision"))
-    results.append(check_import("cv2", "OpenCV (cv2)"))
-    results.append(check_import("numpy", "NumPy"))
-    results.append(check_import("PIL", "Pillow"))
-    results.append(check_import("yaml", "PyYAML"))
-    
-    print("\n[Optional Dependencies]")
-    check_import("win10toast", "win10toast (Windows notifications)")
+
+    print("\n[Required dependencies]")
+    for mod, name in [
+        ("torch", "PyTorch"),
+        ("torchvision", "torchvision"),
+        ("cv2", "OpenCV"),
+        ("numpy", "NumPy"),
+        ("PIL", "Pillow"),
+        ("yaml", "PyYAML"),
+        ("sklearn", "scikit-learn"),
+        ("streamlit", "Streamlit"),
+    ]:
+        results.append(check_import(mod, name))
+
+    print("\n[Optional dependencies]")
     check_import("plyer", "plyer (cross-platform notifications)")
-    check_import("tqdm", "tqdm (progress bars)")
-    check_import("pandas", "pandas (data analysis)")
-    
+    check_import("win10toast", "win10toast (Windows notifications)")
+    check_import("pandas", "pandas")
+    check_import("kagglehub", "kagglehub (dataset fetching)")
+
     print("\n[Hardware]")
     results.append(check_camera())
-    check_gpu()  # GPU is optional
-    
-    print("\n[Project Files]")
-    results.append(check_config())
-    check_model()  # Model is optional for initial setup
-    
-    print("\n" + "="*60)
-    
+    check_device()
+
+    print("\n[Project state]")
+    check_model()
+    results.append(check_config_alignment())
+
+    print("\n" + "=" * 60)
     if all(results):
-        print("✓ All critical checks passed! You're ready to go.")
-        print("\nNext steps:")
-        print("  1. Train a model: python -m src.train --data_dir <path>")
-        print("  2. Start monitoring: python -m src.app")
-    else:
-        print("✗ Some checks failed. Please fix the issues above.")
-        print("\nInstall missing dependencies:")
-        print("  pip install -r requirements.txt")
-    
-    print("="*60)
+        print("✓ All critical checks passed.")
+        print("\nNext: streamlit run src/dashboard.py   (or)   python -m src.app")
+        return 0
+    print("✗ Some checks failed. Fix the issues above.")
+    print("Hint: pip install -e .")
+    return 1
 
 
 if __name__ == "__main__":
-    main()
-
+    raise SystemExit(main())

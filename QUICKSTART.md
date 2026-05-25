@@ -1,129 +1,75 @@
-# Lock-In Monitor - Quick Start Guide
+# Lock-In — Quickstart
 
-Get up and running in 5 minutes!
+Get from clone to live monitoring in under 10 minutes (assuming the pretrained model is published in releases).
 
-## Step 1: Install (1 minute)
+## Prerequisites
+- Python 3.10+
+- A webcam
+- macOS / Linux / Windows
+
+## 1. Install
 
 ```bash
-# Clone repository
-git clone <repository-url>
+git clone https://github.com/adit-rah/lock-in.git
 cd lock-in
-
-# Install dependencies
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -e .
 ```
 
-## Step 2: Get a Pretrained Model (30 seconds)
+## 2. Get a model
 
-**Option A**: Download pretrained model (if available)
+**Option A — pretrained from releases (fastest):**
 ```bash
-# Download from releases
-wget https://github.com/your-repo/lock-in/releases/download/v1.0/distraction_classifier.pt -O models/distraction_classifier.pt
+python scripts/download_model.py
 ```
+This fetches `distraction_classifier.pt` (~45 MB) from the v1.0.0 GitHub release into `models/`.
 
-**Option B**: Use a quick demo model
+**Option B — train your own (45–90 min on Apple Silicon, longer on CPU):**
 ```bash
-# We'll train on minimal personal data
-mkdir -p data/demo
+pip install kagglehub
+# Accept the rules: https://www.kaggle.com/c/state-farm-distracted-driver-detection/rules
+KAGGLE_DIR=$(python -c "import kagglehub; print(kagglehub.competition_download('state-farm-distracted-driver-detection'))")
+python -m scripts.prepare_state_farm --kaggle_dir "$KAGGLE_DIR" --out_dir data/state_farm_binary
+python -m src.train --data_dir data/state_farm_binary --config config.yaml
 ```
 
-## Step 3: Collect Quick Calibration Data (2 minutes)
+## 3. Run
 
+**Dashboard (recommended):**
 ```bash
-# Focused state (30 seconds)
-python scripts/capture_samples.py --class_name focused --duration 30 --output data/demo
-
-# Looking away (30 seconds)
-python scripts/capture_samples.py --class_name looking_away --duration 30 --output data/demo
-
-# Using phone (30 seconds)
-python scripts/capture_samples.py --class_name using_phone --duration 30 --output data/demo
-
-# Yawning (20 seconds)
-python scripts/capture_samples.py --class_name yawning --duration 20 --output data/demo
-
-# Sleepy (20 seconds)  
-python scripts/capture_samples.py --class_name sleepy --duration 20 --output data/demo
+streamlit run src/dashboard.py
 ```
+Click **Start** in the Live tab.
 
-## Step 4: Train Quick Model (1 minute)
-
-```bash
-# Quick training (will be fast with small dataset)
-python -m src.train --data_dir data/demo --config config.yaml
-```
-
-## Step 5: Start Monitoring! (30 seconds)
-
+**Headless CLI:**
 ```bash
 python -m src.app
 ```
 
-You should see:
-```
-============================================================
-Starting Lock-In Focus Monitoring
-============================================================
-Frame interval: 3s
-Rolling window: 10 frames
-Alert threshold: 0.3
+Press Ctrl-C (CLI) or **Stop** (dashboard) to end a session. Logs are written to `data/focus_log.db` (SQLite) and `data/focus_log.csv`.
 
-Press Ctrl+C to stop monitoring
-============================================================
+## Common issues
 
-[14:32:15] Frame    1 | Class: focused (92.3%) | Score: +0.843 | Status: 🔒 LOCKED IN
-```
-
----
-
-## What's Next?
-
-### For Better Accuracy
-1. Collect more samples (100+ per class)
-2. Use public datasets (State Farm, YawDD)
-3. Train for longer (see [USAGE.md](USAGE.md))
-
-### Customize Settings
-Edit `config.yaml` to adjust:
-- Alert frequency
-- Sensitivity
-- Notification messages
-
-### View Your Progress
+**Camera fails to open** — close other apps using the webcam. To test directly:
 ```bash
-python -m src.app --view-sessions
+python -c "import cv2; c=cv2.VideoCapture(0); print('open:', c.isOpened()); c.release()"
 ```
 
----
-
-## Common Issues
-
-**Camera not working?**
+**Inference slow** — confirm the right device is being picked:
 ```bash
-# Test camera
-python -c "import cv2; cam = cv2.VideoCapture(0); print('OK' if cam.isOpened() else 'FAIL'); cam.release()"
+python -c "from src.model import pick_device; print(pick_device())"
 ```
+Should print `mps` on Apple Silicon, `cuda` on a CUDA Linux box, `cpu` otherwise.
 
-**Notifications not showing?**
-```bash
-pip install win10toast  # Windows
-pip install plyer       # Linux/Mac
-```
+**Predictions look inverted** — the trained model and `config.yaml` disagree on class order. Check that `config.classes` matches the `classes` field in `checkpoints/metrics.json`.
 
-**Model accuracy poor?**
-- Collect more samples (Step 3)
-- Ensure good lighting
-- Keep camera position consistent
+## Tuning
 
----
+Edit `config.yaml`:
+- `inference.frame_interval_seconds` — how often to capture (default 3)
+- `scoring.rolling_window_size` — smoothing window length (default 10)
+- `scoring.alert_threshold` — `S < threshold` → distracted (default 0.3)
+- `scoring.consecutive_frames_required` — debounce length before alerting (default 3)
 
-## Full Documentation
-
-- [Complete Usage Guide](USAGE.md)
-- [Dataset Information](docs/DATASETS.md)
-- [Configuration Options](README.md#configuration)
-
----
-
-**Ready to lock in? Let's go! 🔒✨**
-
+Or change them live with the sliders in the Streamlit Live tab — no restart needed.

@@ -1,284 +1,135 @@
-# Lock-In Focus Monitor
+# Lock-In
 
-A desktop application that monitors your focus state in real-time using computer vision. The system captures webcam frames, classifies your attention level using a trained CNN, and alerts you when you're distracted for extended periods.
+Real-time focus monitor. A ResNet18 fine-tuned on the State Farm distracted-driver dataset (~22K images) classifies focused vs. distracted from your webcam; a rolling-window scorer smooths predictions; a Streamlit dashboard shows the live score and past sessions backed by SQLite.
 
-## Features
+All inference runs **on-device** in PyTorch + OpenCV. No frames leave your machine.
 
-- **Real-time Focus Detection**: Classifies attention state every few seconds using your webcam
-- **Smart Scoring System**: Rolling window algorithm to avoid false positives
-- **Desktop Notifications**: Get alerted when losing focus
-- **Comprehensive Logging**:s SQLite database + CSV backup for all sessions
-- **Privacy-First**: All processing happens locally, no cloud uploads
-- **Modular Architecture**: Easily extensible for new input modalities or hardware
-- **Configurable**: Tune sensitivity, intervals, and thresholds via YAML config
+## What's inside
 
-## Classification Categories
+- **Model** — ResNet18 (`torchvision`) with a binary head (`focused` / `distracted`), fine-tuned on State Farm. Achieves **0.88 macro F1** on a driver-disjoint validation split (per-class F1: distracted 0.97, focused 0.80; focused recall 0.86).
+- **Inference pipeline** — `cv2.VideoCapture` with `CAP_PROP_BUFFERSIZE=1` and a grab/retrieve flush so the model always sees the freshest frame. TorchScript model for low-latency forward passes (<300 ms on CPU).
+- **Temporal smoothing** — Rolling window of N predictions; lock-in score `S = P(focused) - P(distracted)`. Alerts fire only on sustained drops below threshold (debounced by consecutive-frame count).
+- **Streamlit dashboard** — Live tab (webcam preview, score gauge, rolling chart, settings sliders) + History tab (SQLite-backed session list + drilldowns).
+- **SQLite logging** — Predictions, scores, and events persisted per-session; predictions are batched into `executemany` flushes (`config.logging.batch_size`) to keep write overhead off the inference path.
+- **CLI mode** — Headless `python -m src.app` for users who don't want a browser tab.
 
-- **focused**: Actively engaged with work
-- **looking_away**: Eyes not on screen
-- **using_phone**: Using mobile device
-- **yawning**: Signs of fatigue
-- **sleepy**: Drowsiness detected
+## Quick start
 
-## System Architecture
-
-```
-[Webcam Capture] → [Preprocessing] → [PyTorch Model Inference]
-                                             ↓
-[Notification] ← [Signal Handler] ← [Scoring Logic] ← [Rolling Window Buffer]
-                                             ↓
-                                    [SQLite + CSV Logging]
-```
-
-## Quick Start
-
-### Prerequisites
-
-- Python 3.8+
-- Webcam
-- Windows/Linux/macOS
-
-### Installation
-
-1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/adit-rah/lock-in.git
 cd lock-in
-```
+pip install -e .
 
-2. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
+# Either fetch the pretrained release checkpoint...
+python scripts/download_model.py
 
-### Training Your Model
+# ...or train from scratch (see "Training" below).
 
-Before using the monitor, you need to train a classification model:
+# Launch the dashboard:
+streamlit run src/dashboard.py
 
-1. **Prepare your dataset** in the following structure:
-```
-data/
-├── focused/
-│   ├── img001.jpg
-│   ├── img002.jpg
-│   └── ...
-├── looking_away/
-│   ├── img001.jpg
-│   └── ...
-├── using_phone/
-│   └── ...
-├── yawning/
-│   └── ...
-└── sleepy/
-    └── ...
-```
-
-2. **Recommended public datasets**:
-   - [State Farm Distracted Driver Detection](https://www.kaggle.com/c/state-farm-distracted-driver-detection)
-   - [YawDD - Yawning Detection Dataset](http://ieee-dataport.org/1096)
-   - [Columbia Gaze Dataset](http://www.cs.columbia.edu/CAVE/databases/columbia_gaze/)
-
-3. **Train the model**:
-```bash
-python -m src.train --data_dir data/training --config config.yaml
-```
-
-This will:
-- Train a MobileNetV3 or ResNet18 classifier
-- Save checkpoints to `checkpoints/`
-- Export the final model as TorchScript to `models/distraction_classifier.pt`
-
-### Running the Monitor
-
-Once trained, start monitoring:
-
-```bash
+# Or run headless:
 python -m src.app
 ```
 
-Or with a custom config:
+Press Ctrl-C (CLI) or click "Stop" (dashboard) to end the session — the SQLite database is flushed automatically.
 
-```bash
-python -m src.app --config my_config.yaml
-```
+## Training
 
-### View Session History
+Lock-In ships with a pipeline targeting [State Farm Distracted Driver Detection](https://www.kaggle.com/c/state-farm-distracted-driver-detection) (~4 GB, requires a Kaggle account).
 
-```bash
-python -m src.app --view-sessions
-```
+1. Download and extract the archive.
+2. Build the binary, driver-disjoint dataset:
+   ```bash
+   python scripts/prepare_state_farm.py \
+       --kaggle_dir /path/to/state-farm-distracted-driver-detection \
+       --out_dir data/state_farm_binary
+   ```
+   `c0` (safe driving) becomes `focused`; `c1`–`c9` become `distracted`. The split is by **subject**, not by image — required for an honest F1 since consecutive frames of the same driver are nearly identical.
+3. Train:
+   ```bash
+   python -m src.train --data_dir data/state_farm_binary --config config.yaml
+   ```
+   At the end you'll get `models/distraction_classifier.pt` (TorchScript) and `checkpoints/metrics.json` (macro F1, per-class precision/recall/F1, confusion matrix).
 
-## ⚙️ Configuration
+State Farm is ~10% focused / 90% distracted after binarization. `config.training.use_class_balanced_sampler: true` (the default) wraps training in a `WeightedRandomSampler` to compensate.
 
-Edit `config.yaml` to customize behavior:
+## Configuration
+
+All knobs live in `config.yaml`. Key settings:
 
 ```yaml
+model:
+  architecture: resnet18    # also supports resnet34, mobilenet_v3_small/large
+  num_classes: 2
+
 inference:
-  frame_interval_seconds: 3  # How often to capture frames
-  camera_index: 0            # Webcam device index
+  frame_interval_seconds: 3
+  max_inference_time_ms: 300
 
 scoring:
-  rolling_window_size: 10           # Frames to average
-  alert_threshold: 0.3              # Lock-in score threshold
-  consecutive_frames_required: 3    # Consecutive distracted frames before alert
+  rolling_window_size: 10
+  alert_threshold: 0.3       # alert when S < this
+  consecutive_frames_required: 3
 
-notification:
-  enabled: true
-  cooldown_seconds: 60  # Minimum time between notifications
+logging:
+  batch_size: 10             # SQLite write batching
 ```
 
-## Understanding Lock-In Score
-
-The **lock-in score** is computed as:
+## How the lock-in score works
 
 ```
 S = mean(P(focused)) - mean(P(distracted))
 ```
 
-Where:
-- `P(focused)` = probability of "focused" class
-- `P(distracted)` = mean probability of distracted classes (looking_away, using_phone, yawning, sleepy)
+Averaged over the rolling window. `S > threshold` → "locked in"; `S < threshold` for `consecutive_frames_required` frames → alert.
 
-**Score ranges**:
-- `S > 0.3`: Locked in
-- `S < 0.3`: Distracted
-
-## Project Structure
+## Repository layout
 
 ```
 lock-in/
-├── config.yaml              # Main configuration
-├── requirements.txt         # Python dependencies
-├── README.md               # This file
 ├── src/
-│   ├── __init__.py
-│   ├── __main__.py         # Module entry point
-│   ├── config.py           # Configuration management
-│   ├── model.py            # Model architecture
-│   ├── train.py            # Training script
-│   ├── inference.py        # Webcam capture & inference
-│   ├── scoring.py          # Rolling window scoring logic
-│   ├── signals.py          # Notification system
-│   ├── logging_db.py       # Database logging
-│   └── app.py              # Main application
-├── models/                 # Trained models
-│   └── distraction_classifier.pt
-├── checkpoints/            # Training checkpoints
-├── data/                   # Logs and database
-│   ├── focus_log.db
-│   └── focus_log.csv
+│   ├── app.py           # CLI entry point
+│   ├── dashboard.py     # Streamlit app
+│   ├── train.py         # State Farm training + F1 reporting
+│   ├── inference.py     # InferenceEngine (cv2 + TorchScript)
+│   ├── scoring.py       # FocusScorer (rolling window)
+│   ├── logging_db.py    # SQLite + CSV persistence
+│   ├── signals.py       # Desktop notifications
+│   ├── config.py        # Dataclass-backed YAML config
+│   └── model.py         # ResNet/MobileNet backbones
+├── scripts/
+│   ├── prepare_state_farm.py    # Kaggle -> binary, driver-disjoint
+│   ├── download_model.py        # Fetches release checkpoint
+│   ├── reorganize_statefarm.py  # (legacy) 3-class mapping
+│   ├── capture_samples.py       # Personal data capture
+│   └── extract_yawdd_frames.py  # YawDD helper
+├── tests/
+├── docs/                # ARCHITECTURE.md, dataset notes
+├── config.yaml
+└── setup.py
 ```
 
-## 🔧 Advanced Usage
+## Performance
 
-### Custom Notifications
+Reported on the driver-disjoint val split of State Farm (3846 images, 22 unique drivers held out from training):
 
-The signal handler system is extensible. To add custom alerts:
+| Metric | Value |
+|---|---|
+| Macro F1 | **0.884** |
+| Accuracy | 94.8% |
+| Distracted F1 / precision / recall | 0.970 / 0.981 / 0.960 |
+| Focused F1 / precision / recall | 0.797 / 0.743 / 0.860 |
+| Inference latency (TorchScript ResNet18, MPS) | ~30 ms / frame |
+| Inference latency (CPU) | <300 ms / frame |
+| Storage | ~1 MB of logging per hour |
 
-```python
-from src.signals import SignalHandler
+`checkpoints/metrics.json` has the full per-epoch history and confusion matrices.
 
-class CustomHandler(SignalHandler):
-    def trigger(self, event):
-        # Your custom logic here
-        print(f"Custom alert: {event}")
-        return True
-```
+## Privacy
 
-### Hardware Integration
-
-Extend `HardwareSignalHandler` for device integration:
-
-```python
-from src.signals import HardwareSignalHandler
-
-class BluetoothShockDevice(HardwareSignalHandler):
-    def __init__(self, device_config):
-        super().__init__(device_config)
-        # Initialize Bluetooth connection
-    
-    def trigger(self, event):
-        # Send signal to device
-        self.device.send_pulse()
-        return True
-```
-
-### Fine-tuning on Personal Data
-
-Collect personal samples and fine-tune:
-
-```python
-# Capture personal samples
-python scripts/capture_samples.py --output data/personal --duration 300
-
-# Fine-tune model
-python -m src.train --data_dir data/personal --config config.yaml --resume models/distraction_classifier.pt
-```
-
-## Performance Metrics
-
-- **Inference latency**: <300ms per frame (CPU)
-- **Storage**: ~1 MB/hour of logging data
-- **Model size**: <100 MB
-- **Accuracy**: Depends on training data quality
-
-## Development
-
-### Running Tests
-
-```bash
-pytest tests/
-```
-
-### Code Formatting
-
-```bash
-black src/
-flake8 src/
-```
-
-## Future Enhancements
-
-- [ ] Keyboard/mouse activity tracking
-- [ ] Multi-modal fusion (webcam + activity sensors)
-- [ ] Adaptive thresholding based on time of day
-- [ ] Integration with productivity tools (RescueTime, Toggl)
-- [ ] Mobile app for remote monitoring
-- [ ] Eye tracking integration
-- [ ] Hardware device support (smart lights, wearables)
-
-## Contributing
-
-Contributions welcome! Please:
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Submit a pull request
+All processing is local. Webcam frames are stored only as predicted-class metadata in the SQLite DB; the raw images are never written to disk.
 
 ## License
 
-MIT License - see LICENSE file for details
-
-## Privacy & Ethics
-
-This application is designed for **personal use only**. Key considerations:
-
-- All processing is local; no data leaves your machine
-- Webcam access is limited to periodic frame capture
-- Use responsibly and with consent if monitoring others
-- Consider potential biases in training data
-
-## Acknowledgments
-
-- Pretrained models from PyTorch/torchvision
-- Public datasets: State Farm, YawDD, Columbia Gaze
-- Notification libraries: plyer, win10toast
-
-## Support
-
-For issues, questions, or feature requests, please open an issue on GitHub.
-
----
-
-**Stay focused, stay productive!**
+MIT — see [LICENSE](LICENSE).

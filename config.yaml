@@ -2,37 +2,33 @@
 
 # Model settings
 model:
-  architecture: "mobilenet_v3_small"  # or "resnet18"
+  architecture: "resnet18"  # ResNet18 fine-tuned on State Farm distracted-driver dataset
   input_size: 224
-  num_classes: 5
+  num_classes: 2
   model_path: "models/distraction_classifier.pt"
   use_gpu: true
 
-# Classes definition
+# Binary classes. Order matches the label indices the model was trained with
+# (DistractionDataset assigns indices in sorted directory order, so
+# 'distracted'=0, 'focused'=1). Keep this aligned with any retrained model.
 classes:
+  - "distracted"
   - "focused"
-  - "looking_away"
-  - "using_phone"
-  - "yawning"
-  - "sleepy"
 
-# Focused vs distracted mapping
+# Anything in this list is treated as a distracted class by the scorer.
 distracted_classes:
-  - "looking_away"
-  - "using_phone"
-  - "yawning"
-  - "sleepy"
+  - "distracted"
 
 # Inference settings
 inference:
   frame_interval_seconds: 3  # Capture frame every N seconds
   camera_index: 0  # Webcam device index
-  max_inference_time_ms: 300  # Maximum allowed inference latency
+  max_inference_time_ms: 300  # Target inference latency
 
-# Scoring settings
+# Scoring settings (temporal smoothing)
 scoring:
-  rolling_window_size: 10  # Number of recent frames to consider
-  alert_threshold: 0.3  # Lock-in score threshold
+  rolling_window_size: 10  # Frames to average for lock-in score
+  alert_threshold: 0.3  # Lock-in score threshold (S < threshold => distracted)
   consecutive_frames_required: 3  # Consecutive distracted frames before alert
 
 # Notification settings
@@ -49,14 +45,15 @@ logging:
   log_scores: true
   csv_backup: true
   csv_path: "data/focus_log.csv"
+  batch_size: 10  # Flush predictions to SQLite every N entries
 
-# Training settings (for model training)
+# Training settings
 training:
   batch_size: 32
   epochs: 50
   learning_rate: 0.001
   weight_decay: 0.0001
-  validation_split: 0.2
+  validation_split: 0.2  # Used only if no explicit val/ subdir is provided
   early_stopping_patience: 10
   checkpoint_dir: "checkpoints"
-
+  use_class_balanced_sampler: true  # Important for State Farm (~1:9 focused:distracted)

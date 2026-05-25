@@ -58,3 +58,6 @@ wandb/
 tensorboard/
 runs/
 
+# Test cache
+.pytest_cache/
+

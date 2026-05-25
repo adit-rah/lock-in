@@ -8,9 +8,9 @@ from dataclasses import dataclass, field
 
 @dataclass
 class ModelConfig:
-    architecture: str = "mobilenet_v3_small"
+    architecture: str = "resnet18"
     input_size: int = 224
-    num_classes: int = 5
+    num_classes: int = 2
     model_path: str = "models/distraction_classifier.pt"
     use_gpu: bool = True
 
@@ -44,6 +44,7 @@ class LoggingConfig:
     log_scores: bool = True
     csv_backup: bool = True
     csv_path: str = "data/focus_log.csv"
+    batch_size: int = 10
 
 
 @dataclass
@@ -55,6 +56,7 @@ class TrainingConfig:
     validation_split: float = 0.2
     early_stopping_patience: int = 10
     checkpoint_dir: str = "checkpoints"
+    use_class_balanced_sampler: bool = False
 
 
 @dataclass

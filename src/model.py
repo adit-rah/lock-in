@@ -7,6 +7,22 @@ from typing import Tuple, Optional
 from pathlib import Path
 
 
+def pick_device(use_gpu: bool = True) -> torch.device:
+    """Return the best available torch device.
+
+    Preference order: CUDA -> Apple Silicon MPS -> CPU. Honors the `use_gpu`
+    config flag — set it to False to force CPU regardless of hardware.
+    """
+    if not use_gpu:
+        return torch.device("cpu")
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    mps_available = getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available()
+    if mps_available:
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 class DistractionClassifier(nn.Module):
     """CNN classifier for distraction detection"""
     
@@ -55,16 +71,19 @@ def create_model(num_classes: int = 5, architecture: str = "mobilenet_v3_small",
 
 
 def save_model_torchscript(model: nn.Module, save_path: str, input_size: Tuple[int, int, int, int] = (1, 3, 224, 224)):
-    """Save model as TorchScript for optimized inference"""
+    """Save model as TorchScript for optimized inference.
+
+    Always traces on CPU so the resulting .pt is portable across devices —
+    `load_model_torchscript` uses `map_location` to move it to CUDA/MPS/CPU on
+    load. Tracing on the source device (e.g. MPS) silently breaks when the
+    example tensor and weights end up on different devices.
+    """
+    model = model.to("cpu")
     model.eval()
-    
-    # Create example input
     example = torch.rand(*input_size)
-    
-    # Trace the model
+
     traced_script_module = torch.jit.trace(model, example)
-    
-    # Save
+
     Path(save_path).parent.mkdir(parents=True, exist_ok=True)
     traced_script_module.save(save_path)
     print(f"Model saved as TorchScript to {save_path}")
@@ -73,8 +92,8 @@ def save_model_torchscript(model: nn.Module, save_path: str, input_size: Tuple[i
 def load_model_torchscript(model_path: str, device: Optional[torch.device] = None) -> torch.jit.ScriptModule:
     """Load TorchScript model for inference"""
     if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+        device = pick_device()
+
     model = torch.jit.load(model_path, map_location=device)
     model.eval()
     return model
@@ -83,8 +102,8 @@ def load_model_torchscript(model_path: str, device: Optional[torch.device] = Non
 def load_model_checkpoint(model_path: str, num_classes: int = 5, architecture: str = "mobilenet_v3_small", device: Optional[torch.device] = None) -> DistractionClassifier:
     """Load model from standard PyTorch checkpoint"""
     if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    
+        device = pick_device()
+
     model = create_model(num_classes=num_classes, architecture=architecture, pretrained=False)
     checkpoint = torch.load(model_path, map_location=device)
     

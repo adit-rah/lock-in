@@ -16,9 +16,9 @@ class TestConfig:
     def test_model_config_defaults(self):
         """Test ModelConfig default values"""
         config = ModelConfig()
-        assert config.architecture == "mobilenet_v3_small"
+        assert config.architecture == "resnet18"
         assert config.input_size == 224
-        assert config.num_classes == 5
+        assert config.num_classes == 2
     
     def test_inference_config_defaults(self):
         """Test InferenceConfig default values"""

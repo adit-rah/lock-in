@@ -20,21 +20,25 @@ class FocusLogger:
             config: Configuration object
         """
         self.config = config
-        
+
         # Create data directory
         db_path = Path(config.logging.database_path)
         db_path.parent.mkdir(parents=True, exist_ok=True)
-        
+
         # Initialize database
         self.db_path = str(db_path)
         self._init_database()
-        
+
         # CSV backup
         if config.logging.csv_backup:
             csv_path = Path(config.logging.csv_path)
             csv_path.parent.mkdir(parents=True, exist_ok=True)
             self.csv_path = str(csv_path)
             self._init_csv()
+
+        # Pending batch for predictions. Flushed every batch_size entries or on close().
+        self._pending_predictions: List[tuple] = []
+        self._batch_size = max(1, getattr(config.logging, 'batch_size', 1))
     
     def _init_database(self):
         """Initialize SQLite database with required tables"""
@@ -132,6 +136,9 @@ class FocusLogger:
     
     def end_session(self, session_id: int):
         """End a logging session and compute statistics"""
+        # Make sure any queued predictions are visible to the summary query.
+        self.flush_predictions()
+
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
         
@@ -165,28 +172,42 @@ class FocusLogger:
         print(f"Ended session {session_id}: {total} frames, {focus_ratio*100:.1f}% focused")
     
     def log_prediction(self, session_id: int, prediction: Dict):
-        """Log a prediction to database"""
+        """Queue a prediction for batched insert.
+
+        SQLite commits are expensive (fsync per call). Buffering predictions and
+        flushing in batches of `config.logging.batch_size` measurably cuts overhead
+        during long monitoring sessions.
+        """
         if not self.config.logging.log_predictions:
             return
-        
-        conn = sqlite3.connect(self.db_path)
-        cursor = conn.cursor()
-        
-        cursor.execute('''
-            INSERT INTO predictions (session_id, timestamp, predicted_class, 
-                                    predicted_class_name, confidence, probabilities)
-            VALUES (?, ?, ?, ?, ?, ?)
-        ''', (
+
+        self._pending_predictions.append((
             session_id,
             prediction['timestamp'],
             prediction['predicted_class'],
             prediction['predicted_class_name'],
             prediction['confidence'],
-            json.dumps(prediction['probabilities'].tolist())
+            json.dumps(prediction['probabilities'].tolist()),
         ))
-        
+
+        if len(self._pending_predictions) >= self._batch_size:
+            self.flush_predictions()
+
+    def flush_predictions(self):
+        """Flush queued predictions to SQLite in one transaction."""
+        if not self._pending_predictions:
+            return
+
+        conn = sqlite3.connect(self.db_path)
+        cursor = conn.cursor()
+        cursor.executemany('''
+            INSERT INTO predictions (session_id, timestamp, predicted_class,
+                                    predicted_class_name, confidence, probabilities)
+            VALUES (?, ?, ?, ?, ?, ?)
+        ''', self._pending_predictions)
         conn.commit()
         conn.close()
+        self._pending_predictions.clear()
     
     def log_score(self, session_id: int, timestamp: datetime, score_data: Dict):
         """Log a score to database"""
@@ -269,6 +290,10 @@ class FocusLogger:
             'focus_ratio': row[6]
         }
     
+    def close(self):
+        """Flush any pending batched writes. Safe to call multiple times."""
+        self.flush_predictions()
+
     def get_recent_sessions(self, limit: int = 10) -> List[Dict]:
         """Get recent session summaries"""
         conn = sqlite3.connect(self.db_path)
